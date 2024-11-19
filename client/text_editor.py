@@ -301,12 +301,10 @@ class TextEditor(customtkinter.CTkFrame):
         next_line = int(next_pos.split('.')[0])
         curr_line = int(cursor_pos.split('.')[0])
         if next_line != curr_line:
-            # Moving into the next line
             line_start = f"{next_line}.0"
             tags = self.text_editor.tag_names(line_start)
             for tag in tags:
                 if tag.startswith("line_lock_") and tag != f"line_lock_{self.current_client.name}":
-                    # Cannot delete into a locked line
                     return "break"
         # Allow delete
         return None
@@ -380,7 +378,6 @@ class TextEditor(customtkinter.CTkFrame):
 
             for tag in tags:
                 if tag.startswith("line_lock_") and tag != f"line_lock_{self.current_client.name}":
-                    # Prevent cursor from moving to this line
                     return "break"
 
             # Move the cursor
@@ -455,34 +452,29 @@ class TextEditor(customtkinter.CTkFrame):
             self.text_editor.tag_remove(f"line_lock_visual_{client.name}", "1.0", "end")
 
         # Configure the visual lock tags
+        # For each range, apply the visual tag to the entire line
         for client in self.clients:
             if client.name != self.current_client.name:
-                # Get ranges of line locks
                 ranges = self.text_editor.tag_ranges(f"line_lock_{client.name}")
-                # For each range, apply the visual tag to the entire line
+                
                 for i in range(0, len(ranges), 2):
                     start = ranges[i]
                     end = ranges[i+1]
                     self.text_editor.tag_add(f"line_lock_visual_{client.name}", start, end)
-                # Configure the visual tag (e.g., set background color to a light shade)
                 self.text_editor.tag_config(f"line_lock_visual_{client.name}", background="#E8E8E8")
             else:
-                # Remove visual lock tags for own locks
                 self.text_editor.tag_remove(f"line_lock_visual_{client.name}", "1.0", "end")
 
     def set_current_client(self, client_name):
         """Switch the active client (debug mode only)."""
         if self.debug_mode:
-            # Save current cursor position
             if self.cursor_active:
                 self.update_current_cursor()
-            # Remove locks held by previous client
             self.cursor_active = False
             self.update_line_locks()
             # Switch client
             self.current_client = self.get_client_by_name(client_name)
             self.client_name = client_name
-            # Remove 'insert' cursor
             self.text_editor.mark_unset('insert')
             self.cursor_active = True
             self.text_editor.focus_set()

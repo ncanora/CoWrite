@@ -2,6 +2,8 @@ import customtkinter
 from tkinter import messagebox, font
 from client import Client, hash_key
 from text_editor import TextEditor
+from websock import *
+from threading import Thread
 import os
 
 # Set appearance and theme
@@ -162,14 +164,12 @@ def launch_connection_gui():
         # Placeholder logic to connect to the server
         print(f"Connecting as {name} to {ip}:{port} with hashed key: {hashed_key}")
 
-        # Simulating success/failure
-        success = True  # Replace with actual logic
-        if success:
-            request_new_copy()  # Call the function upon successful connection
-            root.destroy()
-            launch_text_editor(client_name=name)
-        else:
-            messagebox.showerror("Error", "Connection failed. Please try again.")
+        thread = Thread(target=run_connect_to_host, args=(entry1.get(), entry2.get())).start()
+
+        #request_new_copy()  # Call the function upon successful connection
+        root.withdraw()
+        launch_text_editor(client_name=name)
+        messagebox.showerror("Error", "Connection failed. Please try again.")
 
     button = customtkinter.CTkButton(master=frame, text="Connect", command=handle_connect)
     button.pack(pady=12, padx=10)
@@ -177,7 +177,7 @@ def launch_connection_gui():
     # Debug button
     def handle_debug():
         name = name_entry.get() or "Client1"
-        root.destroy()
+        root.withdraw()
         # In debug mode, we can define multiple clients
         clients = [Client(f"Client{i+1}", color) for i, color in enumerate(['#FF6666', '#66FF66', '#6666FF'])]
         launch_text_editor(client_name=name, clients=clients, debug_mode=True)
