@@ -5,13 +5,20 @@ from text_editor import TextEditor
 from websock import *
 from threading import Thread
 import os
+from sys import platform
 
 # Set appearance and theme
 current_dir = os.path.dirname(os.path.abspath(__file__))
 theme_path = os.path.join(current_dir, "theme.json")
-ico_path = os.path.join(current_dir, "icon.ico")
+ico_path = ""
 customtkinter.set_appearance_mode("system")
 customtkinter.set_default_color_theme("dark-blue")
+
+plt = platform
+if plt == "Windows":
+    ico_path = os.path.join(current_dir, "icon.ico")
+elif plt == "Linux" or plt == "Darwin":
+    ico_path = os.path.join(current_dir, "icon.png")
 
 text_editor_frame = None  # Initialize globally
 
@@ -164,7 +171,7 @@ def launch_connection_gui():
         # Placeholder logic to connect to the server
         print(f"Connecting as {name} to {ip}:{port} with hashed key: {hashed_key}")
 
-        thread = Thread(target=run_connect_to_host, args=(entry1.get(), entry2.get())).start()
+        thread = Thread(target=run_websocket_manager, args=(entry1.get(), entry2.get(), None, None, text_editor_frame)).start()
 
         #request_new_copy()  # Call the function upon successful connection
         root.withdraw()

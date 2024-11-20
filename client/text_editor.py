@@ -1,6 +1,7 @@
 import customtkinter
 from tkinter import messagebox, font, Text
 from client import Client
+from collections import deque
 import os
 
 class TextEditor(customtkinter.CTkFrame):
