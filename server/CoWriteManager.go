@@ -56,7 +56,7 @@ func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWrite
 				addContent(message, cm, file)
 
 			case "REMOVE":
-				removeContent(message, cm)
+				removeContent(message, cm, file)
 
 			case "NEWCLIENT":
 				addClient(message, cm)
@@ -96,8 +96,22 @@ func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
 	fmt.Printf("Added content: %s\n", message.Content)
 }
 
-func removeContent(message Message, cm *ClientManager) {
+func removeContent(message Message, cm *ClientManager, file *CoWriteFile) {
+	if message.StartIndex < 0 || message.EndIndex > int64(len(file.Content)) || message.StartIndex > message.EndIndex {
+		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
+		return
+	}
 
+	updatedContent := append(file.Content[:message.StartIndex], file.Content[message.EndIndex:]...)
+
+	file.Content = updatedContent
+
+	err := os.WriteFile(file.Name, file.Content, 0644)
+	if err != nil {
+		fmt.Printf("Failed to write updated content to file: %v\n", err)
+	}
+
+	fmt.Printf("Removed content between %d and %d\n", message.StartIndex, message.EndIndex)
 }
 
 func addClient(message Message, cm *ClientManager) {
@@ -108,7 +122,7 @@ func removeClient(message Message, cm *ClientManager) {
 
 }
 
-func testAddContent(channel *chan Message) {
+func testAddContent(channel *chan Message, cm *ClientManager, file *CoWriteFile) {
 	// Initialize random seed for generating random content
 	rand.Seed(time.Now().UnixNano())
 
@@ -117,6 +131,7 @@ func testAddContent(channel *chan Message) {
 		{Command: "ADD", StartIndex: 0, Content: "Hello, "},
 		{Command: "ADD", StartIndex: 7, Content: "world! "},
 		{Command: "ADD", StartIndex: 6, Content: "beautiful "},
+		{Command: "REMOVE", StartIndex: 6, EndIndex: 17},
 	}
 
 	// Push the test messages into the channel
@@ -143,11 +158,11 @@ func testAddContent2(channel *chan Message, file *CoWriteFile) {
 			numMessages := rand.Intn(6) + 5
 
 			for i := 0; i < numMessages; i++ {
-				
+
 				currentLength := len(file.Content)
 
 				// Randomize start index within bounds
-				startIndex := rand.Intn(currentLength + 5) 
+				startIndex := rand.Intn(currentLength + 5)
 
 				contentLength := rand.Intn(16) + 5
 				randomContent := make([]byte, contentLength)

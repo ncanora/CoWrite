@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -58,10 +59,10 @@ func main() {
 	}
 	c := createMessageChannel(100)
 	cm := NewClientManager()
-	testAddContent2(c, file)
+	testAddContent(c, cm, file)
 	go executeClientInstructions(c, cm, file)
 
 	for {
-
+		time.Sleep(1 * time.Second)
 	}
 }
