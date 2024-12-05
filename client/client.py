@@ -7,6 +7,5 @@ class Client:
         self.color = color
         self.locked_lines = set()
 
-# Key hashing function
 def hash_key(password):
     return hashlib.sha256(password.encode()).hexdigest()

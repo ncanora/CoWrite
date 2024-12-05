@@ -1,16 +1,23 @@
 import customtkinter
-from tkinter import messagebox, font, Text
+from tkinter import Text
 from client import Client
-from collections import deque
-import os
+import threading
+import json
+import queue
 
 class TextEditor(customtkinter.CTkFrame):
-    def __init__(self, master, client_name, clients=[], debug_mode=False, request_new_copy_callback=None, **kwargs):
+    def __init__(self, master, client_name, send_queue, receive_queue, clients=[], debug_mode=False, request_new_copy_callback=None, **kwargs):
         super().__init__(master, **kwargs)
         self.debug_mode = debug_mode
         self.client_name = client_name
-        self.cursor_active = False
+        self.send_queue = send_queue
+        self.receive_queue = receive_queue
+        self.input_buffer = ""
+        self.batch_timer = None
+        self.batch_interval = 500  # milliseconds
         self.request_new_copy_callback = request_new_copy_callback
+        self.cursor_active = False  # Initialize cursor_active
+        self.last_cursor_line = '1'
 
         if debug_mode:
             self.clients = clients
@@ -44,25 +51,26 @@ class TextEditor(customtkinter.CTkFrame):
             self.text_editor.mark_set('insert', '1.0')
             self.update_current_cursor()
 
+        # Start a thread to handle incoming messages
+        threading.Thread(target=self.handle_incoming_messages, daemon=True).start()
+
     def bind_events(self):
         self.text_editor.bind("<KeyPress>", self.on_key_press)
         self.text_editor.bind("<KeyRelease>", self.on_key_release)
         self.text_editor.bind("<Button-1>", self.on_mouse_click)
-        self.text_editor.bind("<<Cut>>", self.on_cut)
-        self.text_editor.bind("<<Clear>>", self.on_clear)
-        self.text_editor.bind("<<Paste>>", self.on_paste)
-        self.text_editor.bind("<<Copy>>", self.on_copy)
         self.text_editor.bind("<ButtonRelease>", self.on_mouse_release)
         self.text_editor.bind("<B1-Motion>", self.on_mouse_drag)
-        self.text_editor.bind("<MouseWheel>", self.update_line_numbers)
         self.text_editor.bind("<<Selection>>", self.on_selection)
         self.text_editor.bind("<BackSpace>", self.on_backspace)
         self.text_editor.bind("<Delete>", self.on_delete_key)
+        self.text_editor.bind("<KeyRelease>", self.on_cursor_move)
+        self.text_editor.bind("<ButtonRelease>", self.on_cursor_move)
 
         navigation_keys = ["<Up>", "<Down>", "<Left>", "<Right>", "<Home>", "<End>", "<Prior>", "<Next>"]
         for key in navigation_keys:
             self.text_editor.bind(key, self.on_arrow_key)
 
+        # Replace default insert and delete with safe versions
         self.text_editor.original_insert = self.text_editor.insert
         self.text_editor.original_delete = self.text_editor.delete
         self.text_editor.insert = self.safe_insert
@@ -194,28 +202,140 @@ class TextEditor(customtkinter.CTkFrame):
     def on_key_press(self, event=None):
         if not self.cursor_active:
             return "break"
-
+        # Check if the current line is locked by another client
         cursor_pos = self.text_editor.index('insert')
         line_start = f"{cursor_pos.split('.')[0]}.0"
-        line_end = f"{cursor_pos.split('.')[0]}.end"
-
-        # Check if the line is locked by another client
         tags = self.text_editor.tag_names(line_start)
         for tag in tags:
             if tag.startswith("line_lock_") and tag != f"line_lock_{self.current_client.name}":
-                # Line is locked by another client
+                # Cannot edit a line locked by another client
                 return "break"
+        # Append the character to input buffer if it's a printable character or newline/tab
+        if event.char and (event.char.isprintable() or event.char in ('\n', '\r', '\t')):
+            # Convert carriage return to newline if necessary
+            if event.char == '\r':
+                self.input_buffer += '\n'
+            else:
+                self.input_buffer += event.char
+            # Start the batch timer if not already running
+            if self.batch_timer is None:
+                self.batch_timer = self.text_editor.after(self.batch_interval, self.send_batched_input)
+        # Allow the key press
+        return None
 
-        # Lock the line to the current client
-        self.text_editor.tag_add(f"line_lock_{self.current_client.name}", line_start, line_end)
-        self.current_client.locked_lines.add(int(cursor_pos.split('.')[0]))
-        self.update_line_locks_visual()
 
     def on_key_release(self, event=None):
-        self.update_current_cursor()
-        self.update_line_numbers()
-        self.update_other_cursors()
-        self.update_line_locks()
+            self.update_current_cursor()
+            self.update_line_numbers()
+            self.update_other_cursors()
+            self.update_line_locks()
+            if not self.cursor_active:
+                return
+            # Start the batch timer if not already running
+            if self.batch_timer is None:
+                self.batch_timer = self.text_editor.after(self.batch_interval, self.send_batched_input)
+
+    def send_batched_input(self):
+        if self.input_buffer:
+            cursor_pos = self.text_editor.index('insert')
+            index = self.get_char_index(cursor_pos)
+            start_index = index - len(self.input_buffer)
+            message = {
+                'command': 'ADD',
+                'clientName': self.client_name,
+                'startIndex': start_index,
+                'content': self.input_buffer
+            }
+            print(f"Sending ADD message to server: {message}")  # Debug statement
+            self.send_queue.put(json.dumps(message))
+            self.input_buffer = ""
+        self.batch_timer = None  # Reset the batch timer
+
+
+    def on_cursor_move(self, event=None):
+        if not self.cursor_active:
+            return
+        if 'insert' not in self.text_editor.mark_names():
+            return
+        cursor_pos = self.text_editor.index('insert')
+        current_line = cursor_pos.split('.')[0]
+        if self.last_cursor_line != current_line:
+            self.last_cursor_line = current_line
+            index = self.get_char_index(cursor_pos)
+            message = {
+                'command': 'CURSOR_MOVE',
+                'clientName': self.current_client.name,
+                'cursorLocation': index
+            }
+            self.send_queue.put(json.dumps(message))
+
+    def get_char_index(self, cursor_pos):
+        # Convert 'line.column' to a character index
+        count = self.text_editor.count("1.0", cursor_pos, "chars")[0]
+        return int(count)
+
+
+    def handle_incoming_messages(self):
+        while True:
+            try:
+                message = self.receive_queue.get()
+                self.process_server_message(message)
+            except Exception as e:
+                print(f"Error handling incoming message: {e}")
+
+    def process_server_message(self, message):
+        data = json.loads(message)
+        command = data.get('command')
+        origin_client = data.get('clientName')
+
+        if origin_client == self.client_name:
+            # Skip processing if the message originated from this client
+            return
+
+        if command == 'ADD':
+            self.apply_add(data)
+        elif command == 'REMOVE':
+            self.apply_remove(data)
+        elif command == 'CURSOR_MOVE':
+            self.update_client_cursor(data)
+        elif command == 'DOCUMENT':
+            self.load_document(data)
+
+    def apply_add(self, data):
+        start_index = data['startIndex']
+        content = data['content']
+        tk_index = self.get_tk_index(start_index)
+        # Insert the content without triggering events
+        self.text_editor.event_generate("<<TextModified>>")
+        self.text_editor.insert(tk_index, content)
+
+    def apply_remove(self, data):
+        start_index = data['startIndex']
+        end_index = data['endIndex']
+        tk_start = self.get_tk_index(start_index)
+        tk_end = self.get_tk_index(end_index)
+        # Delete the content without triggering events
+        self.text_editor.event_generate("<<TextModified>>")
+        self.text_editor.delete(tk_start, tk_end)
+
+    def load_document(self, data):
+        content = data.get('content', '')
+        self.text_editor.delete('1.0', 'end')
+        self.text_editor.insert('1.0', content)
+
+    def update_client_cursor(self, data):
+        client_name = data.get('clientName')
+        cursor_location = data['cursorLocation']
+        client = self.get_client_by_name(client_name)
+        if client and client.name != self.current_client.name:
+            tk_index = self.get_tk_index(cursor_location)
+            self.text_editor.mark_set(client.cursor_mark_name, tk_index)
+            self.update_other_cursors()
+
+    def get_tk_index(self, char_index):
+        # Convert character index back to 'line.column'
+        index = self.text_editor.index(f"1.0 + {char_index} chars")
+        return index
 
     def on_mouse_click(self, event=None):
         index = self.text_editor.index(f"@{event.x},{event.y}")
@@ -291,6 +411,17 @@ class TextEditor(customtkinter.CTkFrame):
                 if tag.startswith("line_lock_") and tag != f"line_lock_{self.current_client.name}":
                     # Cannot backspace into a locked line
                     return "break"
+        # Prepare REMOVE message
+        start_index = self.get_char_index(prev_pos)
+        end_index = self.get_char_index(cursor_pos)
+        message = {
+            'command': 'REMOVE',
+            'clientName': self.client_name,
+            'startIndex': start_index,
+            'endIndex': end_index
+        }
+        print(f"Sending REMOVE message to server: {message}")  # Debugging statement
+        self.send_queue.put(json.dumps(message))
         # Allow backspace
         return None
 
@@ -307,6 +438,17 @@ class TextEditor(customtkinter.CTkFrame):
             for tag in tags:
                 if tag.startswith("line_lock_") and tag != f"line_lock_{self.current_client.name}":
                     return "break"
+        # Prepare REMOVE message
+        start_index = self.get_char_index(cursor_pos)
+        end_index = self.get_char_index(next_pos)
+        message = {
+            'command': 'REMOVE',
+            'clientName': self.client_name,
+            'startIndex': start_index,
+            'endIndex': end_index
+        }
+        print(f"Sending REMOVE message to server: {message}")  # Debugging statement
+        self.send_queue.put(json.dumps(message))
         # Allow delete
         return None
 
@@ -453,18 +595,47 @@ class TextEditor(customtkinter.CTkFrame):
             self.text_editor.tag_remove(f"line_lock_visual_{client.name}", "1.0", "end")
 
         # Configure the visual lock tags
-        # For each range, apply the visual tag to the entire line
         for client in self.clients:
-            if client.name != self.current_client.name:
-                ranges = self.text_editor.tag_ranges(f"line_lock_{client.name}")
-                
-                for i in range(0, len(ranges), 2):
-                    start = ranges[i]
-                    end = ranges[i+1]
-                    self.text_editor.tag_add(f"line_lock_visual_{client.name}", start, end)
-                self.text_editor.tag_config(f"line_lock_visual_{client.name}", background="#E8E8E8")
-            else:
-                self.text_editor.tag_remove(f"line_lock_visual_{client.name}", "1.0", "end")
+            if client.name == self.current_client.name:
+                continue  # Skip the current client to avoid highlighting own lines
+            ranges = self.text_editor.tag_ranges(f"line_lock_{client.name}")
+            for i in range(0, len(ranges), 2):
+                start = ranges[i]
+                end = ranges[i+1]
+                self.text_editor.tag_add(f"line_lock_visual_{client.name}", start, end)
+            # Use client's color for background and adjust text color for readability
+            self.text_editor.tag_config(
+                f"line_lock_visual_{client.name}",
+                background=client.color,
+                foreground=self.get_contrasting_text_color(client.color)
+            )
+
+    def get_contrasting_text_color(self, bg_color):
+        # Simple function to determine a contrasting text color (black or white)
+        bg_color = bg_color.lstrip('#')
+        r, g, b = int(bg_color[0:2], 16), int(bg_color[2:4], 16), int(bg_color[4:6], 16)
+        luminance = (0.299*r + 0.587*g + 0.114*b)/255
+        return '#000000' if luminance > 0.5 else '#FFFFFF'
+
+    def update_line_locks_visual(self):
+        """Update the visual indication of line locks."""
+        # Remove existing visual lock tags
+        for client in self.clients:
+            self.text_editor.tag_remove(f"line_lock_visual_{client.name}", "1.0", "end")
+
+        # Configure the visual lock tags
+        for client in self.clients:
+            ranges = self.text_editor.tag_ranges(f"line_lock_{client.name}")
+            for i in range(0, len(ranges), 2):
+                start = ranges[i]
+                end = ranges[i+1]
+                self.text_editor.tag_add(f"line_lock_visual_{client.name}", start, end)
+            # Use client's color for background and set text color to ensure readability
+            self.text_editor.tag_config(
+                f"line_lock_visual_{client.name}",
+                background=client.color,
+                foreground=self.get_contrasting_text_color(client.color)
+        )
 
     def set_current_client(self, client_name):
         """Switch the active client (debug mode only)."""

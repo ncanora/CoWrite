@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"time"
@@ -54,9 +56,11 @@ func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWrite
 			switch message.Command {
 			case "ADD":
 				addContent(message, cm, file)
+				broadcastMessage(message, cm) // Broadcast the ADD message
 
 			case "REMOVE":
 				removeContent(message, cm, file)
+				broadcastMessage(message, cm) // Broadcast the REMOVE message
 
 			case "NEWCLIENT":
 				addClient(message, cm)
@@ -64,31 +68,32 @@ func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWrite
 			case "REMOVECLIENT":
 				removeClient(message, cm)
 
+			case "CURSOR_MOVE":
+				moveClient(message, cm)
+				broadcastMessage(message, cm) // Broadcast the CLIENTMOVE message
 			default:
 				continue
 			}
 		default:
-
 			continue
 		}
 	}
 }
 
 func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
-	// Step 1: Validate StartIndex
-	if message.StartIndex < 0 || message.StartIndex > int64(len(file.Content)) {
+	// Validate index
+	if message.StartIndex < 0 || message.StartIndex > int(len(file.Content)) {
 		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
 		return
 	}
 
-	// Step 2: Insert content at StartIndex
 	updatedContent := append(file.Content[:message.StartIndex],
 		append([]byte(message.Content), file.Content[message.StartIndex:]...)...)
 
-	// Step 3: Update in-memory content
+	// Update in-memory content
 	file.Content = updatedContent
-
-	// Step 4: Write back to the file
+	cm.File.Content = updatedContent
+	// write-back to file
 	err := os.WriteFile(file.Name, file.Content, 0644)
 	if err != nil {
 		fmt.Printf("Failed to write updated content to file: %v\n", err)
@@ -97,14 +102,17 @@ func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
 }
 
 func removeContent(message Message, cm *ClientManager, file *CoWriteFile) {
-	if message.StartIndex < 0 || message.EndIndex > int64(len(file.Content)) || message.StartIndex > message.EndIndex {
+	// Validate indices
+	if message.StartIndex < 0 || message.EndIndex > int(len(file.Content)) || message.StartIndex > message.EndIndex {
 		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
 		return
 	}
 
+	// construct slice without removed content
 	updatedContent := append(file.Content[:message.StartIndex], file.Content[message.EndIndex:]...)
 
 	file.Content = updatedContent
+	cm.File.Content = updatedContent
 
 	err := os.WriteFile(file.Name, file.Content, 0644)
 	if err != nil {
@@ -115,11 +123,65 @@ func removeContent(message Message, cm *ClientManager, file *CoWriteFile) {
 }
 
 func addClient(message Message, cm *ClientManager) {
+	client := Client{
+		Conn:           message.Conn,
+		Name:           message.ClientName,
+		CursorLocation: -1,
+		LineNumber:     -1,
+		Send:           make(chan []byte),
+	}
+	cm.AddClient(client)
+	go clientWriter(&client)
 
+	// Send current document content to the new client
+	docMessage := Message{
+		Command: "DOCUMENT",
+		Content: string(cm.File.Content), // Ensure this contains the current content
+	}
+	msgBytes, err := json.Marshal(docMessage)
+	if err != nil {
+		log.Println("Error marshalling document message:", err)
+		return
+	}
+	client.Send <- msgBytes
 }
 
 func removeClient(message Message, cm *ClientManager) {
 
+}
+
+func moveClient(message Message, cm *ClientManager) {
+	client := cm.GetClientByName(message.ClientName)
+	if client == nil {
+		fmt.Printf("Client %s not found\n", message.ClientName)
+		return
+	}
+
+	client.CursorLocation = message.CursorLocation
+}
+
+func broadcastMessage(message Message, cm *ClientManager) {
+	msgBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Println("Error marshalling message:", err)
+		return
+	}
+
+	for _, client := range cm.Clients {
+		if client.Name == message.ClientName {
+			// Skip the originating client if necessary
+			continue
+		}
+		if client.Send == nil {
+			continue // Skip uninitialized clients
+		}
+		select {
+		case client.Send <- msgBytes:
+		default:
+			log.Println("Client send channel blocked, removing client:", client.Name)
+			cm.RemoveClientByName(client.Name)
+		}
+	}
 }
 
 func testAddContent(channel *chan Message, cm *ClientManager, file *CoWriteFile) {
@@ -172,7 +234,7 @@ func testAddContent2(channel *chan Message, file *CoWriteFile) {
 
 				msg := Message{
 					Command:    "ADD",
-					StartIndex: int64(startIndex),
+					StartIndex: int(startIndex),
 					Content:    string(randomContent),
 				}
 

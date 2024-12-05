@@ -1,33 +1,56 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+var c *chan Message
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
 
-func reader(conn *websocket.Conn) string {
+func reader(conn *websocket.Conn, messages *chan Message) string {
 	for {
-		messageType, p, err := conn.ReadMessage()
+		_, p, err := conn.ReadMessage()
 		if err != nil {
 			log.Println(err)
 			return ""
 		}
 
-		log.Println(string(p))
+		log.Println("Received from client:", string(p))
 
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Println(err)
-			return ""
+		// Try to unmarshal into a single Message first
+		var msg Message
+		err = json.Unmarshal(p, &msg)
+		if err == nil {
+			if msg.Command == "NEWCLIENT" {
+				msg.Conn = conn // Attach the connection to the message
+			}
+			*messages <- msg
+			log.Println("Message passed to channel:", msg)
+			continue
 		}
-		conn.WriteMessage(1, []byte(p))
+
+		// If unmarshalling into a single Message fails, try unmarshalling into a slice of Messages
+		var msgs []Message
+		err = json.Unmarshal(p, &msgs)
+		if err == nil {
+			for _, m := range msgs {
+				if m.Command == "NEWCLIENT" {
+					m.Conn = conn // Attach the connection to the message
+				}
+				*messages <- m
+				log.Println("Message passed to channel:", m)
+			}
+		} else {
+			log.Println("Error unmarshalling message:", err)
+		}
 	}
 }
 
@@ -41,28 +64,38 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("Client Connected")
-	ws.WriteMessage(1, []byte("Hello Client!"))
-	reader(ws)
+	go reader(ws, c)
 }
 
 func setupServer() {
 	http.HandleFunc("/ws", wsEndpoint)
 }
-func main() {
-	//fmt.Println("Starting server on port 8080")
-	//setupServer()
-	//log.Fatal(http.ListenAndServe(":8081", nil))
-	file, error := initializeFile("test")
 
-	if error != nil {
-		log.Fatal(error)
+func main() {
+	// Initialize the file
+	file, err := initializeFile("test")
+	if err != nil {
+		log.Fatal("Error initializing file:", err)
 	}
-	c := createMessageChannel(100)
-	cm := NewClientManager()
-	testAddContent(c, cm, file)
+
+	// Create message channel
+	c = createMessageChannel(100)
+
+	// Create client manager
+	cm := NewClientManager(file)
+
+	// Start the goroutine to execute client instructions
 	go executeClientInstructions(c, cm, file)
 
-	for {
-		time.Sleep(1 * time.Second)
-	}
+	// Set up the server
+	setupServer()
+
+	// Start the server
+	log.Println("Server started on port 8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	// Keep the main function running (optional if needed)
+	// for {
+	// 	time.Sleep(1 * time.Second)
+	// }
 }

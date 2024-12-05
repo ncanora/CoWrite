@@ -2,9 +2,11 @@ import customtkinter
 from tkinter import messagebox, font
 from client import Client, hash_key
 from text_editor import TextEditor
-from websock import *
+from websock import WebSocketClient
 from threading import Thread
+import queue
 import os
+import json
 from sys import platform
 
 # Set appearance and theme
@@ -28,7 +30,7 @@ def request_new_copy():
     # Future implementation to request the server copy of the document
 
 # Main GUI for text editor
-def launch_text_editor(client_name, clients=[], debug_mode=False):
+def launch_text_editor(client_name, ip, port, hashed_key, clients=[], debug_mode=False):
     global text_editor_frame
     customtkinter.set_appearance_mode("light")
     try:
@@ -41,7 +43,7 @@ def launch_text_editor(client_name, clients=[], debug_mode=False):
     editor_root.title("CoWrite Text Editor")
     if os.path.exists(ico_path):
         editor_root.iconbitmap(ico_path)
-    editor_root.geometry("900x700") 
+    editor_root.geometry("900x700")
 
     frame = customtkinter.CTkFrame(master=editor_root, fg_color="#D9D9D9")
     frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -50,10 +52,29 @@ def launch_text_editor(client_name, clients=[], debug_mode=False):
     toolbar_frame = customtkinter.CTkFrame(master=frame, fg_color="#E8E8E8")
     toolbar_frame.pack(fill="x", padx=5, pady=5)
 
+    # Initialize queues
+    send_queue = queue.Queue()
+    receive_queue = queue.Queue()
+    uri = f"ws://{ip}:{port}/ws"
+
+    # Start the WebSocket client
+    ws_client = WebSocketClient(uri, send_queue, receive_queue)
+    ws_client.start()
+
+    # Send initial connection message
+    initial_message = {
+        'command': 'NEWCLIENT',
+        'clientName': client_name,
+        'key': hashed_key
+    }
+    send_queue.put(json.dumps(initial_message))
+
     # Text Editor
     text_editor_frame = TextEditor(
         frame,
         client_name=client_name,
+        send_queue=send_queue,
+        receive_queue=receive_queue,
         clients=clients,
         debug_mode=debug_mode,
         request_new_copy_callback=request_new_copy  # Pass the callback here
@@ -112,7 +133,9 @@ def launch_text_editor(client_name, clients=[], debug_mode=False):
 
     # Font Size Dropdown
     font_sizes = [str(size) for size in range(8, 32, 2)]
-    font_size_menu = customtkinter.CTkOptionMenu(toolbar_frame, values=font_sizes, command=lambda size: change_font_size(int(size)))
+    font_size_menu = customtkinter.CTkOptionMenu(
+        toolbar_frame, values=font_sizes, command=lambda size: change_font_size(int(size))
+    )
     font_size_menu.set("12")
     font_size_menu.pack(side="left", padx=5)
 
@@ -168,15 +191,11 @@ def launch_connection_gui():
             return
 
         hashed_key = hash_key(key)
-        # Placeholder logic to connect to the server
         print(f"Connecting as {name} to {ip}:{port} with hashed key: {hashed_key}")
 
-        thread = Thread(target=run_websocket_manager, args=(entry1.get(), entry2.get(), None, None, text_editor_frame)).start()
-
-        #request_new_copy()  # Call the function upon successful connection
         root.withdraw()
-        launch_text_editor(client_name=name)
-        messagebox.showerror("Error", "Connection failed. Please try again.")
+        launch_text_editor(client_name=name, ip=ip, port=port, hashed_key=hashed_key)
+        # In case of connection failure, you can handle reconnection logic
 
     button = customtkinter.CTkButton(master=frame, text="Connect", command=handle_connect)
     button.pack(pady=12, padx=10)
