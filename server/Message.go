@@ -12,5 +12,6 @@ type Message struct {
 	EndIndex       int             `json:"endIndex,omitempty"`
 	Content        string          `json:"content,omitempty"`
 	CursorLocation int             `json:"cursorLocation,omitempty"`
+	ClientList     []string        `json:"clientList,omitempty"` // Add this line
 	Conn           *websocket.Conn `json:"-"`
 }

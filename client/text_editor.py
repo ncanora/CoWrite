@@ -5,6 +5,12 @@ import threading
 import json
 import queue
 
+# imagine spending 90% of your time writing a text editor for a distributed systems project
+
+# TODO:
+# Line numbers don't update when scrolling
+# Line locking visuals don't update 
+
 class TextEditor(customtkinter.CTkFrame):
     def __init__(self, master, client_name, send_queue, receive_queue, clients=[], debug_mode=False, request_new_copy_callback=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -146,11 +152,8 @@ class TextEditor(customtkinter.CTkFrame):
             )
             client_button.pack(side="left", padx=2)
 
+    # debug mode
     def add_client(self):
-        if len(self.clients) >= 5:
-            messagebox.showinfo("Info", "Maximum number of clients reached.")
-            return
-
         new_client_name = f"Client{len(self.clients) + 1}"
         new_client_color = self.generate_color(len(self.clients))
         new_client = Client(new_client_name, new_client_color)
@@ -163,6 +166,7 @@ class TextEditor(customtkinter.CTkFrame):
         self.update_client_buttons()
         print(f"Added {new_client_name}")
 
+    # debug mode
     def remove_client(self):
         if len(self.clients) > 1:
             removed_client = self.clients.pop()
@@ -268,6 +272,7 @@ class TextEditor(customtkinter.CTkFrame):
                 'cursorLocation': index
             }
             self.send_queue.put(json.dumps(message))
+            self.update_line_locks()
 
     def get_char_index(self, cursor_pos):
         # Convert 'line.column' to a character index
@@ -286,12 +291,6 @@ class TextEditor(customtkinter.CTkFrame):
     def process_server_message(self, message):
         data = json.loads(message)
         command = data.get('command')
-        origin_client = data.get('clientName')
-
-        if origin_client == self.client_name:
-            # Skip processing if the message originated from this client
-            return
-
         if command == 'ADD':
             self.apply_add(data)
         elif command == 'REMOVE':
@@ -300,7 +299,43 @@ class TextEditor(customtkinter.CTkFrame):
             self.update_client_cursor(data)
         elif command == 'DOCUMENT':
             self.load_document(data)
+        elif command == 'NEWCLIENT':
+            self.add_new_client(data)
+        elif command == 'CLIENTS_LIST':
+            self.add_existing_clients(data)
 
+    def add_existing_clients(self, data):
+        client_list = data.get('clientList', [])
+        for client_name in client_list:
+            if client_name != self.client_name:
+                new_client = Client(client_name, self.generate_color(len(self.clients)))
+                self.clients.append(new_client)
+                # Initialize cursor position and other necessary attributes
+                invisible_text = Text(self, width=0, height=0)
+                invisible_text.pack_forget()
+                self.invisible_textboxes[new_client.name] = invisible_text
+                invisible_text.mark_set(new_client.cursor_mark_name, '1.0')
+                self.create_cursor_legend()
+        self.update_line_locks_visual()
+        self.update_line_locks()
+
+    def add_new_client(self, data):
+        client_name = data.get('clientName')
+        if client_name and client_name != self.client_name:
+            new_client = Client(client_name, self.generate_color(len(self.clients)))
+            self.clients.append(new_client)
+            # Initialize cursor position and other necessary attributes
+            invisible_text = Text(self, width=0, height=0)
+            invisible_text.pack_forget()
+            self.invisible_textboxes[new_client.name] = invisible_text
+            invisible_text.mark_set(new_client.cursor_mark_name, '1.0')
+            self.create_cursor_legend()
+            self.update_line_locks_visual()
+            self.update_line_locks()
+            print(f"Added new client: {new_client.name}")
+        else:
+            print(f"Received NEWCLIENT message for self or invalid client: {client_name}")
+    
     def apply_add(self, data):
         start_index = data['startIndex']
         content = data['content']
@@ -608,7 +643,8 @@ class TextEditor(customtkinter.CTkFrame):
                 f"line_lock_visual_{client.name}",
                 background=client.color,
                 foreground=self.get_contrasting_text_color(client.color)
-            )
+        )
+
 
     def get_contrasting_text_color(self, bg_color):
         # Simple function to determine a contrasting text color (black or white)

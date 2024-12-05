@@ -136,14 +136,39 @@ func addClient(message Message, cm *ClientManager) {
 	// Send current document content to the new client
 	docMessage := Message{
 		Command: "DOCUMENT",
-		Content: string(cm.File.Content), // Ensure this contains the current content
+		Content: string(cm.File.Content),
 	}
-	msgBytes, err := json.Marshal(docMessage)
+	client.Send <- marshalMessage(docMessage)
+
+	// Send the list of existing clients to the new client
+	clientsList := make([]string, 0)
+	for name := range cm.Clients {
+		if name != client.Name {
+			clientsList = append(clientsList, name)
+		}
+	}
+
+	clientsListMessage := Message{
+		Command:    "CLIENTS_LIST",
+		ClientList: clientsList,
+	}
+	client.Send <- marshalMessage(clientsListMessage)
+
+	// Broadcast NEWCLIENT message to all other clients
+	newClientMessage := Message{
+		Command:    "NEWCLIENT",
+		ClientName: client.Name,
+	}
+	broadcastNewClientMessage(newClientMessage, cm, client.Name)
+}
+
+func marshalMessage(msg Message) []byte {
+	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		log.Println("Error marshalling document message:", err)
-		return
+		log.Println("Error marshalling message:", err)
+		return nil
 	}
-	client.Send <- msgBytes
+	return msgBytes
 }
 
 func removeClient(message Message, cm *ClientManager) {
@@ -170,6 +195,30 @@ func broadcastMessage(message Message, cm *ClientManager) {
 	for _, client := range cm.Clients {
 		if client.Name == message.ClientName {
 			// Skip the originating client if necessary
+			continue
+		}
+		if client.Send == nil {
+			continue // Skip uninitialized clients
+		}
+		select {
+		case client.Send <- msgBytes:
+		default:
+			log.Println("Client send channel blocked, removing client:", client.Name)
+			cm.RemoveClientByName(client.Name)
+		}
+	}
+}
+
+func broadcastNewClientMessage(message Message, cm *ClientManager, newClientName string) {
+	msgBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Println("Error marshalling message:", err)
+		return
+	}
+
+	for _, client := range cm.Clients {
+		if client.Name == newClientName {
+			// Skip sending the NEWCLIENT message back to the new client
 			continue
 		}
 		if client.Send == nil {
