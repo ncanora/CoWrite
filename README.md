@@ -51,7 +51,6 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 <br>
-![CoWrite Screenshot](images/screenshot.png)
 
 **CoWrite** is a real-time collaborative text editor that allows multiple users to edit documents simultaneously.
 
