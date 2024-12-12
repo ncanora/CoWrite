@@ -39,6 +39,7 @@
         <li><a href="#setup">Setup</a></li>
       </ul>
     </li>
+    <li><a href="#releases">Releases</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
@@ -101,3 +102,9 @@ Ensure you have the following installed on your machine:
 4. Enter a nickname that will be shown to other clients, you can enter anything for the key (not implemented yet)
    
 5. You should now be editing your CoWrite document! You should be able to see when new clients connect, see their edits in realtime, and see which cursor is who's by hovering your mouse over another client's cursor.
+
+NOTE: This will only work over a local network unless you have setup a public-facing IP Address and port forwarding.
+
+## Releases
+<br>
+Alternatively, follow the same steps above but run the executable instead of running through the command line.
