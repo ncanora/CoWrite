@@ -12,7 +12,6 @@
     <br />
     <a href="https://github.com/ncanora/CoWrite"><strong>Explore the docs »</strong></a>
     <br />
-    <br />
     <a href="https://github.com/ncanora/CoWrite">View Demo</a>
     ·
     <a href="https://github.com/ncanora/CoWrite/issues">Report Bug</a>
