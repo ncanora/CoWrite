@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CoWrite</title>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #auth-container {
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        #editor-container {
+            height: 400px;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+            display: none; 
+        }
+        #legend {
+            margin-bottom: 10px;
+            display: none;
+        }
+        #error-message {
+            color: red;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Collaborative Text Editor</h1>
+
+<div id="auth-container">
+    <h2>Login</h2>
+    <form id="auth-form">
+        <div>
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" required>
+        </div>
+        <div>
+            <label for="key">Key:</label><br>
+            <input type="password" id="key" required>
+        </div>
+        <button type="submit">Connect</button>
+    </form>
+    <div id="error-message">Authentication failed. Please try again.</div>
+</div>
+
+<div id="legend"><strong>Clients:</strong></div>
+<div id="editor-container"></div>
+
+<!--client-->
+<!--Need to include as CDN scripts, cannot use node packages in browser-->
+<script src="
+https://cdn.jsdelivr.net/npm/quill-cursors@4.0.3/dist/quill-cursors.min.js
+"></script>
+<script src="client.js"></script>
+
+</body>
+</html>

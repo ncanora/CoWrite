@@ -50,29 +50,29 @@ func createMessageChannel(value int) *chan Message {
 
 func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWriteFile) {
 	for {
-		// Check if there's a message in the channel
-		select {
-		case message := <-(*c): // block until a message is received in channel
-			switch message.Command {
-			case "ADD":
-				addContent(message, cm, file)
-				broadcastMessage(message, cm) // Broadcast the ADD message
-
-			case "REMOVE":
-				removeContent(message, cm, file)
-				broadcastMessage(message, cm) // Broadcast the REMOVE message
-
-			case "NEWCLIENT":
-				addClient(message, cm)
-
-			case "REMOVECLIENT":
-				removeClient(message, cm)
-
-			case "CURSOR_MOVE":
-				moveClient(message, cm)
-				broadcastMessage(message, cm) // Broadcast the CLIENTMOVE message
-			default:
-				continue
+		message := <-(*c)
+		switch message.Command {
+		case "ADD":
+			addContent(message, cm, file)
+			broadcastMessage(message, cm)
+		case "REMOVE":
+			removeContent(message, cm, file)
+			broadcastMessage(message, cm)
+		case "NEWCLIENT":
+			addClient(message, cm)
+		case "REMOVECLIENT":
+			removeClient(message, cm)
+		case "CURSOR_MOVE":
+			moveClient(message, cm)
+			broadcastMessage(message, cm)
+		case "REQUEST_DOCUMENT":
+			client := cm.GetClientByName(message.ClientName)
+			if client != nil && client.Send != nil {
+				docMsg := Message{
+					Command: "DOCUMENT",
+					Content: string(cm.File.Content),
+				}
+				client.Send <- marshalMessage(docMsg)
 			}
 		default:
 			continue
@@ -81,23 +81,32 @@ func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWrite
 }
 
 func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
-	// Validate index
-	if message.StartIndex < 0 || message.StartIndex > int(len(file.Content)) {
+	// Validate 'Content' field
+	if message.Content == "" {
+		fmt.Printf("Received ADD with empty Content. Ignoring.\n")
+		return
+	}
+
+	// Validate 'StartIndex'
+	if message.StartIndex < 0 || message.StartIndex > len(file.Content) {
 		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
 		return
 	}
 
+	// Insert content
 	updatedContent := append(file.Content[:message.StartIndex],
 		append([]byte(message.Content), file.Content[message.StartIndex:]...)...)
 
 	// Update in-memory content
 	file.Content = updatedContent
 	cm.File.Content = updatedContent
-	// write-back to file
+
+	// Write back to file
 	err := os.WriteFile(file.Name, file.Content, 0644)
 	if err != nil {
 		fmt.Printf("Failed to write updated content to file: %v\n", err)
 	}
+
 	fmt.Printf("Added content: %s\n", message.Content)
 }
 
@@ -128,20 +137,20 @@ func addClient(message Message, cm *ClientManager) {
 		Name:           message.ClientName,
 		CursorLocation: -1,
 		LineNumber:     -1,
-		Send:           make(chan []byte),
+		Send:           make(chan []byte, 512), // Buffered channel
 	}
 	cm.AddClient(client)
 	go clientWriter(&client)
 
-	// Send current document content to the new client
+	// Send DOCUMENT message
 	docMessage := Message{
 		Command: "DOCUMENT",
 		Content: string(cm.File.Content),
 	}
 	client.Send <- marshalMessage(docMessage)
 
-	// Send the list of existing clients to the new client
-	clientsList := make([]string, 0)
+	// Send CLIENTS_LIST message
+	clientsList := make([]string, 0, len(cm.Clients)-1)
 	for name := range cm.Clients {
 		if name != client.Name {
 			clientsList = append(clientsList, name)
@@ -154,7 +163,7 @@ func addClient(message Message, cm *ClientManager) {
 	}
 	client.Send <- marshalMessage(clientsListMessage)
 
-	// Broadcast NEWCLIENT message to all other clients
+	// Broadcast NEWCLIENT message to other clients
 	newClientMessage := Message{
 		Command:    "NEWCLIENT",
 		ClientName: client.Name,
@@ -192,9 +201,11 @@ func broadcastMessage(message Message, cm *ClientManager) {
 		return
 	}
 
+	log.Printf("Broadcasting message: %s", string(msgBytes))
+
 	for _, client := range cm.Clients {
 		if client.Name == message.ClientName {
-			// Skip the originating client if necessary
+			// Skip the originating client
 			continue
 		}
 		if client.Send == nil {
@@ -202,6 +213,7 @@ func broadcastMessage(message Message, cm *ClientManager) {
 		}
 		select {
 		case client.Send <- msgBytes:
+			log.Printf("Sent message to %s: %s", client.Name, string(msgBytes))
 		default:
 			log.Println("Client send channel blocked, removing client:", client.Name)
 			cm.RemoveClientByName(client.Name)

@@ -4,8 +4,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	writeWait      = 60 * time.Second    // Time allowed to write a message to the client.
+	pongWait       = 60 * time.Second    // Time allowed to read the next pong message from the client.
+	pingPeriod     = (pongWait * 9) / 10 // Send pings at this period. Must be less than pongWait.
+	maxMessageSize = 512                 // Maximum message size allowed from client.
 )
 
 var c *chan Message
@@ -15,42 +23,42 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func reader(conn *websocket.Conn, messages *chan Message) string {
+func reader(conn *websocket.Conn, messages *chan Message) {
+	defer conn.Close()
+
+	// Set maximum message size
+	conn.SetReadLimit(maxMessageSize)
+	// Set initial read deadline
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	// Handle Pong messages to reset read deadline
+	conn.SetPongHandler(func(appData string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	for {
 		_, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Println(err)
-			return ""
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("Unexpected close error: %v", err)
+			} else {
+				log.Printf("Read error: %v", err)
+			}
+			return
 		}
 
-		log.Println("Received from client:", string(p))
-
-		// Try to unmarshal into a single Message first
 		var msg Message
 		err = json.Unmarshal(p, &msg)
-		if err == nil {
-			if msg.Command == "NEWCLIENT" {
-				msg.Conn = conn // Attach the connection to the message
-			}
-			*messages <- msg
-			log.Println("Message passed to channel:", msg)
+		if err != nil {
+			log.Println("Error unmarshalling message:", err)
 			continue
 		}
 
-		// If unmarshalling into a single Message fails, try unmarshalling into a slice of Messages
-		var msgs []Message
-		err = json.Unmarshal(p, &msgs)
-		if err == nil {
-			for _, m := range msgs {
-				if m.Command == "NEWCLIENT" {
-					m.Conn = conn // Attach the connection to the message
-				}
-				*messages <- m
-				log.Println("Message passed to channel:", m)
-			}
-		} else {
-			log.Println("Error unmarshalling message:", err)
+		if msg.Command == "NEWCLIENT" {
+			msg.Conn = conn
 		}
+
+		*messages <- msg
 	}
 }
 
@@ -69,6 +77,8 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 
 func setupServer() {
 	http.HandleFunc("/ws", wsEndpoint)
+	fs := http.FileServer(http.Dir("./JSClient"))
+	http.Handle("/", fs)
 }
 
 func main() {
