@@ -36,14 +36,41 @@ func reader(conn *websocket.Conn, messages *chan Message) {
 		return nil
 	})
 
+	// Create a ticker to send Ping messages periodically
+	pingTicker := time.NewTicker(pingPeriod)
+	defer pingTicker.Stop()
+
+	// Create a channel to signal when to stop the ping goroutine
+	done := make(chan struct{})
+
+	// Start a goroutine to send Ping messages
+	go func() {
+		for {
+			select {
+			case <-pingTicker.C:
+				// Send Ping message
+				err := conn.WriteMessage(websocket.PingMessage, []byte{})
+				if err != nil {
+					log.Println("Error sending Ping:", err)
+					conn.Close()
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	for {
 		_, p, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("Unexpected close error: %v", err)
+				log.Printf("Read error: %v", err)
 			} else {
 				log.Printf("Read error: %v", err)
 			}
+			// Signal the ping goroutine to stop
+			close(done)
 			return
 		}
 
