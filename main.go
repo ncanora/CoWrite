@@ -26,9 +26,9 @@ var upgrader = websocket.Upgrader{
 func reader(conn *websocket.Conn, messages *chan Message) {
 	defer conn.Close()
 
-	// Set maximum message size
+	// WebSocket config
 	conn.SetReadLimit(maxMessageSize)
-	// Set initial read deadline
+
 	conn.SetReadDeadline(time.Now().Add(pongWait))
 	// Handle Pong messages to reset read deadline
 	conn.SetPongHandler(func(appData string) error {
@@ -40,10 +40,9 @@ func reader(conn *websocket.Conn, messages *chan Message) {
 	pingTicker := time.NewTicker(pingPeriod)
 	defer pingTicker.Stop()
 
-	// Create a channel to signal when to stop the ping goroutine
 	done := make(chan struct{})
 
-	// Start a goroutine to send Ping messages
+	// ping messages
 	go func() {
 		for {
 			select {
@@ -115,23 +114,19 @@ func main() {
 		log.Fatal("Error initializing file:", err)
 	}
 
-	// Create message channel
+	// message channel
 	c = createMessageChannel(100)
-
-	// Create client manager
 	cm := NewClientManager(file)
 
 	// Start the goroutine to execute client instructions
 	go executeClientInstructions(c, cm, file)
 
-	// Set up the server
 	setupServer()
 
 	// Start the server
 	log.Println("Server started on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
-	// Keep the main function running (optional if needed)
 	// for {
 	// 	time.Sleep(1 * time.Second)
 	// }

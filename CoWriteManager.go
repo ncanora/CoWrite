@@ -48,6 +48,7 @@ func createMessageChannel(value int) *chan Message {
 	return &ch
 }
 
+// run this in a goroutine
 func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWriteFile) {
 	for {
 		message := <-(*c)
@@ -81,19 +82,18 @@ func executeClientInstructions(c *chan Message, cm *ClientManager, file *CoWrite
 }
 
 func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
-	// Validate 'Content' field
+	// Validate Content
 	if message.Content == "" {
 		fmt.Printf("Received ADD with empty Content. Ignoring.\n")
 		return
 	}
 
-	// Validate 'StartIndex'
+	// Validate Index
 	if message.StartIndex < 0 || message.StartIndex > len(file.Content) {
 		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
 		return
 	}
 
-	// Insert content
 	updatedContent := append(file.Content[:message.StartIndex],
 		append([]byte(message.Content), file.Content[message.StartIndex:]...)...)
 
@@ -111,7 +111,6 @@ func addContent(message Message, cm *ClientManager, file *CoWriteFile) {
 }
 
 func removeContent(message Message, cm *ClientManager, file *CoWriteFile) {
-	// Validate indices
 	if message.StartIndex < 0 || message.EndIndex > int(len(file.Content)) || message.StartIndex > message.EndIndex {
 		fmt.Printf("Invalid StartIndex: %d\n", message.StartIndex)
 		return
@@ -245,8 +244,9 @@ func broadcastNewClientMessage(message Message, cm *ClientManager, newClientName
 	}
 }
 
+// Debugging funcs
+
 func testAddContent(channel *chan Message, cm *ClientManager, file *CoWriteFile) {
-	// Initialize random seed for generating random content
 	rand.Seed(time.Now().UnixNano())
 
 	// Define some random test messages
@@ -257,7 +257,6 @@ func testAddContent(channel *chan Message, cm *ClientManager, file *CoWriteFile)
 		{Command: "REMOVE", StartIndex: 6, EndIndex: 17},
 	}
 
-	// Push the test messages into the channel
 	go func() {
 		for _, msg := range testMessages {
 			fmt.Printf("Sending message: %+v\n", msg)
@@ -268,16 +267,15 @@ func testAddContent(channel *chan Message, cm *ClientManager, file *CoWriteFile)
 }
 
 func testAddContent2(channel *chan Message, file *CoWriteFile) {
-	// Initialize random seed for generating random content
 	rand.Seed(time.Now().UnixNano())
 
-	// Define possible characters for random content
+	// Define possible characters
 	characters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ  \n"
 
 	// Periodically send a batch of messages
 	go func() {
 		for {
-			// Generate a random number of messages (e.g., 5-10)
+			// Generate a random number of messages
 			numMessages := rand.Intn(6) + 5
 
 			for i := 0; i < numMessages; i++ {

@@ -1,4 +1,4 @@
-// ================= Configuration & State =================
+// ================= Client Setup =================
 const CLIENT_COLORS = [
     '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4',
     '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff'
@@ -157,14 +157,14 @@ const CLIENT_COLORS = [
   
       cursors = quill.getModule('cursors');
   
-      // Verify that cursors module is loaded
+      // quill-cursors module loaded
       if (!cursors) {
           console.error("Cursors module not loaded.");
           showError("Failed to load cursor functionalities.");
           return;
       }
   
-      // Force newline insertion at doc end on Enter
+      // Force newline insertion at doc end (changes the default behavior of Quill)
       quill.keyboard.addBinding({ key: 13 }, (range, context) => {
           if (range.index >= quill.getLength() - 1) {
               quill.insertText(range.index, '\n');
@@ -231,7 +231,7 @@ const CLIENT_COLORS = [
           });
       });
   
-      // Handle incoming Ping messages from server
+      // Ping messages (prevents disconnection due to inactivity)
       ws.onmessage = (event) => {
           const msg = JSON.parse(event.data);
           if (msg.command === 'PING') {
@@ -407,6 +407,7 @@ const CLIENT_COLORS = [
       return color;
   }
   
+  // Get a new copy of doc when client failure 
   function requestDocumentFromServer() {
       sendMessage({
           command: "REQUEST_DOCUMENT",
